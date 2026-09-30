@@ -11,6 +11,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>PDF 문서 요약</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📄</text></svg>">
 <style>
   :root {
     --bg: #f1ebfb;
@@ -392,7 +393,8 @@
 </div>
 
 <!-- 로드 순서 (PRD 3.3): config.js(선택) → pdf.js → pdf_extract.js → pdf_summarizer.js → 인라인 UI -->
-<script src="config.js"></script>
+<!-- config.js(API 키)는 내 PC에서 더블클릭(file://)으로 열 때만 불러온다. 배포 사이트에는 없는 파일이라 404를 막으려고 조건부로 넣음 -->
+<script>if (location.protocol === 'file:') document.write('<script src="config.js"><\/script>');</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
         integrity="sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ=="
         crossorigin="anonymous" referrerpolicy="no-referrer"></script>

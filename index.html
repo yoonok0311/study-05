@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>AI 공감 다이어리</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📔</text></svg>">
 <!-- 선택: 부드러운 한글 글꼴. 오프라인이면 시스템 글꼴로 대체됨 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -385,7 +386,8 @@
 </div>
 
 <!-- config.js는 선택(없으면 404만 나고 넘어감). 그다음 llm.js -->
-<script src="config.js"></script>
+<!-- config.js(API 키)는 내 PC에서 더블클릭(file://)으로 열 때만 불러온다. 배포 사이트에는 없는 파일이라 404를 막으려고 조건부로 넣음 -->
+<script>if (location.protocol === 'file:') document.write('<script src="config.js"><\/script>');</script>
 <script src="llm.js"></script>
 <script>
 /* AI 공감 다이어리 화면 스크립트. 사용자/AI 텍스트는 모두 textContent로만 넣는다. */
