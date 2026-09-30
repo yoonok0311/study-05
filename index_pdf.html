@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<!-- Created: 2026-09-30 11:28 -->
+<!--
+  index_pdf.html — PDF 문서 요약 화면 (더블클릭으로 여는 file:// 단일 페이지, 빌드 없음)
+  기준 문서: PRD_pdf.md 3.3장, 5장(P1-1~P1-4, P1-10, P1-12, P1-13, P1-21, P1-23~P1-28, P1-30, P1-31, P1-33), 7장
+  UI는 window.PdfExtract / window.PdfSummarizer 두 전역 API만 쓴다. 모든 동적 텍스트는 textContent로 넣는다.
+-->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>PDF 문서 요약</title>
+<style>
+  :root {
+    --bg: #f1ebfb;
+    --card: #ffffff;
+    --ink: #231c33;
+    --ink-soft: #56506a;
+    --line: #ddd3ee;
+    --accent: #6a3fc0;
+    --accent-ink: #ffffff;
+    --accent-soft: #efe7fc;
+    --focus: #b3470f;
+    --drop-bg: #faf7fe;
+    --drop-active: #e6dafa;
+    --warn-bg: #fff4d9;
+    --warn-ink: #5c4200;
+    --warn-line: #e3c168;
+    --error-bg: #fdecec;
+    --error-ink: #8a1c1c;
+    --ok-ink: #1d6b37;
+    --chip-bg: #ece4f8;
+    --chip-ink: #35264f;
+    --shadow: 0 1px 2px rgba(20, 30, 50, .06), 0 4px 16px rgba(20, 30, 50, .06);
+    --font: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151020;
+      --card: #1f182d;
+      --ink: #ece8f4;
+      --ink-soft: #b7aecb;
+      --line: #3a3050;
+      --accent: #c1a4f7;
+      --accent-ink: #1a1030;
+      --accent-soft: #2e2346;
+      --focus: #ffb27a;
+      --drop-bg: #1a1427;
+      --drop-active: #35285a;
+      --warn-bg: #3a2f12;
+      --warn-ink: #ffe3a3;
+      --warn-line: #8a6d25;
+      --error-bg: #3d1d1d;
+      --error-ink: #ffc9c9;
+      --ok-ink: #8fe0a8;
+      --chip-bg: #2f2644;
+      --chip-ink: #e6dcf6;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .25);
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 1rem;
+    line-height: 1.65;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  [hidden] { display: none !important; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  [tabindex="-1"]:focus { outline: none; }
+  [tabindex="-1"]:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+  .wrap { max-width: 48rem; margin: 0 auto; padding: 0 1rem 3rem; }
+
+  /* 헤더 */
+  .page-head {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: .5rem 1rem; padding: 1.25rem 0 1rem;
+  }
+  .page-head h1 { margin: 0; font-size: 1.5rem; line-height: 1.3; }
+  .page-head .sub { margin: .15rem 0 0; color: var(--ink-soft); font-size: .92rem; }
+
+  /* 카드 */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 1.1rem 1.15rem;
+    margin-bottom: 1rem;
+  }
+  .card h2 { margin: 0 0 .5rem; font-size: 1.1rem; line-height: 1.4; }
+  .muted { color: var(--ink-soft); font-size: .92rem; }
+
+  /* 버튼 */
+  .btn {
+    font: inherit; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 44px; padding: .5rem 1.1rem;
+    border-radius: 10px; border: 1.5px solid var(--accent);
+    background: var(--accent); color: var(--accent-ink);
+    cursor: pointer;
+  }
+  .btn:hover:not(:disabled) { filter: brightness(1.07); }
+  .btn:disabled { cursor: not-allowed; opacity: .55; }
+  .btn.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+  .btn.ghost:hover:not(:disabled) { background: var(--accent-soft); filter: none; }
+  .btn.small { min-height: 38px; padding: .3rem .8rem; font-size: .92rem; }
+  .link-btn {
+    font: inherit; background: none; border: 0; padding: .4rem .2rem; min-height: 44px;
+    color: var(--accent); text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .9rem; }
+
+  /* 드롭 영역 (P1-1, P1-2) */
+  .drop {
+    display: block;
+    border: 2px dashed var(--line);
+    border-radius: 14px;
+    background: var(--drop-bg);
+    padding: 2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: background-color .15s, border-color .15s;
+  }
+  .drop:hover { border-color: var(--accent); }
+  .drop.is-over { background: var(--drop-active); border-color: var(--accent); border-style: solid; }
+  .drop[aria-disabled="true"] { cursor: not-allowed; opacity: .7; }
+  .drop-icon { width: 44px; height: 44px; color: var(--accent); margin: 0 auto .4rem; display: block; }
+  .drop-title { margin: 0; font-size: 1.1rem; font-weight: 700; }
+  .drop-pick {
+    display: inline-block; margin-top: .6rem; padding: .45rem 1.1rem; min-height: 44px; line-height: 1.8;
+    border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-weight: 700;
+  }
+  .drop-limit { margin: .6rem 0 0; color: var(--ink-soft); font-size: .9rem; }
+  .drop .short { display: none; }
+  #upload.compact { padding: .6rem; }
+  .drop.compact {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .25rem .75rem;
+    padding: .55rem .75rem;
+  }
+  .drop.compact .drop-icon, .drop.compact .drop-limit, .drop.compact .full { display: none; }
+  .drop.compact .short { display: inline; }
+  .drop.compact .drop-title { font-size: .95rem; }
+  .drop.compact .drop-pick { margin-top: 0; min-height: 38px; line-height: 1.6; padding: .3rem .9rem; }
+  #upload.compact .privacy { margin-top: .5rem; }
+  .privacy { margin: .75rem 0 0; font-size: .88rem; color: var(--ink-soft); }
+
+  /* 알림 */
+  .notice {
+    border-radius: 10px; padding: .6rem .85rem; margin: 0 0 1rem;
+    background: var(--warn-bg); color: var(--warn-ink); border: 1px solid var(--warn-line);
+  }
+  .notice.info { background: var(--accent-soft); color: var(--ink); border-color: var(--line); }
+  .warn-list { list-style: none; margin: .75rem 0 0; padding: 0; display: grid; gap: .45rem; }
+  .warn-list li {
+    background: var(--warn-bg); color: var(--warn-ink); border: 1px solid var(--warn-line);
+    border-radius: 10px; padding: .5rem .75rem; font-size: .93rem;
+  }
+
+  /* 파일 카드 */
+  .file-name { margin: 0; font-weight: 700; font-size: 1.05rem; }
+  .facts { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; margin: .35rem 0 0; padding: 0; }
+  .facts div { display: flex; gap: .35rem; }
+  .facts dt { color: var(--ink-soft); }
+  .facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .plan {
+    margin: .9rem 0 0; padding: .7rem .85rem; border-radius: 10px;
+    background: var(--accent-soft);
+  }
+  .plan-count { margin: 0; font-weight: 700; font-size: 1.05rem; }
+  .plan p { margin: .2rem 0 0; }
+
+  /* 진행 (P1-24) */
+  .progress-text { margin: 0 0 .5rem; font-weight: 700; }
+  .bar { height: 10px; border-radius: 99px; background: var(--chip-bg); overflow: hidden; }
+  .bar-fill { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .25s; }
+  .bar.indeterminate .bar-fill { width: 35%; animation: slide 1.4s ease-in-out infinite; }
+  @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+  @media (prefers-reduced-motion: reduce) {
+    .bar.indeterminate .bar-fill { animation: none; width: 100%; opacity: .5; }
+    .bar-fill, .drop { transition: none; }
+  }
+  .progress-sub { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .5rem; margin-top: .6rem; }
+
+  /* 오류 (P1-30) */
+  .error-box { background: var(--error-bg); color: var(--error-ink); border-color: transparent; }
+  .error-box h2 { color: var(--error-ink); }
+  .error-box p { margin: 0; }
+  .error-box .extra { margin-top: .35rem; font-size: .93rem; }
+  .error-box .btn.ghost { color: var(--error-ink); border-color: currentColor; }
+
+  /* 키 패널 (P1-23) */
+  .key-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+  .key-row input {
+    flex: 1 1 14rem; min-width: 0; min-height: 44px;
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1.5px solid var(--line); border-radius: 10px; padding: .45rem .7rem;
+  }
+  .key-msg { margin: .5rem 0 0; font-size: .93rem; min-height: 1.2em; }
+  .key-msg.ok { color: var(--ok-ink); }
+  .key-msg.bad { color: var(--error-ink); }
+  .key-panel a { color: var(--accent); }
+
+  /* 결과 (P1-25) */
+  .result-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .25rem 1rem; margin-bottom: .75rem; }
+  .result-head h2 { margin: 0; font-size: 1.25rem; }
+  .one-line {
+    margin: 0; padding: 1rem 1.1rem; border-radius: 12px;
+    background: var(--accent-soft); border-left: 5px solid var(--accent);
+    font-size: 1.12rem; font-weight: 700; line-height: 1.55;
+  }
+  .block { margin-top: 1.25rem; }
+  .block h3 { margin: 0 0 .45rem; font-size: 1rem; color: var(--ink-soft); letter-spacing: .02em; }
+  .points { margin: 0; padding-left: 1.3rem; }
+  .points li { margin: .25rem 0; }
+  .sections { display: grid; gap: .6rem; }
+  .section { border: 1px solid var(--line); border-radius: 10px; padding: .75rem .9rem; }
+  .section h4 { margin: 0 0 .25rem; font-size: 1rem; }
+  .section p { margin: 0; white-space: pre-line; }
+  .chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .4rem; }
+  .chips li {
+    background: var(--chip-bg); color: var(--chip-ink);
+    border-radius: 99px; padding: .2rem .75rem; font-size: .92rem;
+  }
+  .meta {
+    margin: 1.25rem 0 0; padding-top: .75rem; border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: max-content 1fr; gap: .15rem .9rem; font-size: .9rem;
+  }
+  .meta dt { color: var(--ink-soft); }
+  .meta dd { margin: 0; min-width: 0; }
+  .copy-msg { margin: .5rem 0 0; font-size: .93rem; min-height: 1.3em; }
+  .copy-msg.bad { color: var(--error-ink); }
+  .copy-msg.ok { color: var(--ok-ink); }
+
+  @media (min-width: 40rem) {
+    .wrap { padding: 0 1.5rem 3rem; }
+    .card { padding: 1.35rem 1.5rem; }
+    .page-head h1 { font-size: 1.75rem; }
+    .drop { padding: 2.75rem 1.5rem; }
+  }
+  @media (max-width: 24rem) {
+    .actions .btn { flex: 1 1 auto; }
+    .meta { grid-template-columns: 1fr; }
+    .meta dd { margin-bottom: .3rem; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page-head">
+    <div>
+      <h1>PDF 문서 요약</h1>
+      <p class="sub">PDF를 올리면 AI가 한국어로 요약해 드려요.</p>
+    </div>
+    <button id="key-settings-btn" class="link-btn" type="button" aria-controls="key-panel" aria-expanded="false">API 키 설정</button>
+  </header>
+
+  <main>
+    <!-- 키 입력 패널 (P1-23) -->
+    <section id="key-panel" class="card key-panel" aria-labelledby="key-title" hidden>
+      <h2 id="key-title" tabindex="-1">OpenRouter API 키</h2>
+      <p id="key-reason">요약하려면 OpenRouter API 키가 필요해요.</p>
+      <p id="key-source" class="muted"></p>
+      <form id="key-form" novalidate>
+        <label for="key-input">API 키 입력</label>
+        <div class="key-row">
+          <input id="key-input" type="password" autocomplete="off" spellcheck="false"
+                 autocapitalize="off" placeholder="OpenRouter에서 만든 키를 붙여 넣기" aria-describedby="key-msg">
+          <button class="btn" type="submit">저장</button>
+        </div>
+        <p id="key-msg" class="key-msg" role="status" aria-live="polite"></p>
+      </form>
+      <p class="muted">키는 이 브라우저에만 저장되고 화면에 다시 보이지 않아요. 키는 <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">openrouter.ai/keys</a>에서 만들 수 있어요.</p>
+      <div class="actions">
+        <button id="key-clear" class="btn ghost small" type="button">저장된 키 지우기</button>
+        <button id="key-close" class="btn ghost small" type="button">닫기</button>
+      </div>
+    </section>
+
+    <!-- 드롭 영역 (P1-1, P1-31) -->
+    <section id="upload" class="card" aria-label="PDF 올리기">
+      <div id="drop-zone" class="drop" role="button" tabindex="0"
+           aria-describedby="drop-limit privacy-note">
+        <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>
+          <path d="M14 3v5h5"/><path d="M12 17v-6"/><path d="M9.5 13.5 12 11l2.5 2.5"/>
+        </svg>
+        <p class="drop-title"><span class="full">PDF를 여기에 끌어다 놓거나</span><span class="short">다른 PDF를 끌어다 놓거나</span></p>
+        <span class="drop-pick">PDF 선택</span>
+        <p id="drop-limit" class="drop-limit">20MB·100쪽 이하, 글자가 들어 있는 PDF 1개</p>
+      </div>
+      <input id="file-input" class="sr-only" type="file" accept=".pdf,application/pdf" tabindex="-1" aria-hidden="true">
+      <p id="privacy-note" class="privacy">PDF 글자 내용이 OpenRouter와 AI 모델 제공자에게 전송돼요. 무료 모델은 제공자가 데이터를 학습에 쓸 수 있으니 민감한 문서는 올리지 마세요.</p>
+    </section>
+
+    <!-- 짧은 안내 (취소, 여러 파일, 처리 중 드롭 등) -->
+    <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+
+    <!-- 파일 카드 + 요청 계획 (P1-13) -->
+    <section id="file-card" class="card" aria-labelledby="file-title" hidden>
+      <h2 id="file-title" class="sr-only">선택한 파일</h2>
+      <p id="file-name" class="file-name"></p>
+      <dl class="facts">
+        <div><dt>크기</dt><dd id="file-size"></dd></div>
+        <div><dt>쪽수</dt><dd id="file-pages"></dd></div>
+        <div id="file-doc-title-row" hidden><dt>문서 제목</dt><dd id="file-doc-title"></dd></div>
+      </dl>
+      <div id="plan" class="plan" hidden>
+        <p id="plan-count" class="plan-count"></p>
+        <p id="plan-detail" class="muted"></p>
+        <p id="plan-time" class="muted"></p>
+        <p class="muted">무료 모델은 하루 약 50회까지 요청할 수 있어요 (크레딧 10달러 미만 계정 기준).</p>
+        <p class="muted">AI 서버가 붐비거나 서버 오류·빈 응답이 오면 한 번 자동으로 다시 요청해요. 시간 초과나 네트워크 오류는 자동으로 다시 하지 않으니 [다시 시도]를 눌러 주세요.</p>
+      </div>
+      <ul id="plan-warnings" class="warn-list" hidden></ul>
+      <div id="plan-actions" class="actions" hidden>
+        <button id="start-btn" class="btn" type="button">요약 시작</button>
+        <button id="other-btn" class="btn ghost" type="button">다른 파일</button>
+      </div>
+    </section>
+
+    <!-- 진행 (P1-24, P1-21) -->
+    <section id="progress" class="card" aria-label="진행 상황" hidden>
+      <p id="progress-text" class="progress-text" role="status" aria-live="polite"></p>
+      <div id="bar" class="bar" aria-hidden="true"><div id="bar-fill" class="bar-fill"></div></div>
+      <div class="progress-sub">
+        <span class="muted"><span id="elapsed"></span><span id="slow-hint" hidden></span></span>
+        <button id="cancel-btn" class="btn ghost" type="button">취소</button>
+      </div>
+    </section>
+
+    <!-- 오류 (P1-30) -->
+    <section id="error-box" class="card error-box" role="alert" aria-labelledby="error-title" tabindex="-1" hidden>
+      <h2 id="error-title">문제가 생겼어요</h2>
+      <p id="error-msg"></p>
+      <p id="error-extra" class="extra" hidden></p>
+      <div class="actions">
+        <button id="retry-btn" class="btn" type="button" hidden>다시 시도</button>
+        <button id="error-key-btn" class="btn ghost" type="button" hidden>API 키 입력</button>
+      </div>
+    </section>
+
+    <!-- 결과 (P1-25, P1-27, P1-28) -->
+    <section id="result" class="card" aria-labelledby="result-title" hidden>
+      <div class="result-head">
+        <h2 id="result-title" tabindex="-1">요약 결과</h2>
+        <span id="result-file" class="muted"></span>
+      </div>
+      <ul id="result-warnings" class="warn-list" hidden></ul>
+
+      <div class="block">
+        <h3>한 줄 요약</h3>
+        <p id="r-one-line" class="one-line"></p>
+      </div>
+      <div class="block">
+        <h3>핵심 요점</h3>
+        <ul id="r-points" class="points"></ul>
+      </div>
+      <div class="block">
+        <h3>상세 요약</h3>
+        <div id="r-sections" class="sections"></div>
+      </div>
+      <div id="r-keywords-block" class="block">
+        <h3>키워드</h3>
+        <ul id="r-keywords" class="chips"></ul>
+      </div>
+
+      <dl id="r-meta" class="meta"></dl>
+
+      <div class="actions">
+        <button id="copy-btn" class="btn" type="button">전체 복사</button>
+        <button id="md-btn" class="btn ghost" type="button">.md 저장</button>
+        <button id="txt-btn" class="btn ghost" type="button">.txt 저장</button>
+        <button id="new-btn" class="btn ghost" type="button">새 파일</button>
+      </div>
+      <p id="copy-msg" class="copy-msg" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+</div>
+
+<!-- 로드 순서 (PRD 3.3): config.js(선택) → pdf.js → pdf_extract.js → pdf_summarizer.js → 인라인 UI -->
+<script src="config.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
+        integrity="sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="pdf_extract.js"></script>
+<script src="pdf_summarizer.js"></script>
+<script>
+/* 인라인 UI 스크립트 — 동적 문자열은 모두 textContent로만 넣는다 (P1-26) */
+(function () {
+  'use strict';
+
+  var Extract = window.PdfExtract;
+  var Summ = window.PdfSummarizer;
+  var UNKNOWN_MSG = '알 수 없는 문제가 생겼어요. 페이지를 새로 고쳐 주세요.';
+
+  function $(id) { return document.getElementById(id); }
+  var el = {
+    keySettings: $('key-settings-btn'), keyPanel: $('key-panel'), keyTitle: $('key-title'),
+    keyReason: $('key-reason'), keySource: $('key-source'), keyForm: $('key-form'),
+    keyInput: $('key-input'), keyMsg: $('key-msg'), keyClear: $('key-clear'), keyClose: $('key-close'),
+    drop: $('drop-zone'), fileInput: $('file-input'), notice: $('notice'),
+    fileCard: $('file-card'), fileName: $('file-name'), fileSize: $('file-size'), filePages: $('file-pages'),
+    docTitleRow: $('file-doc-title-row'), docTitle: $('file-doc-title'),
+    upload: $('upload'), privacy: $('privacy-note'),
+    plan: $('plan'), planCount: $('plan-count'), planTime: $('plan-time'), planDetail: $('plan-detail'), planWarnings: $('plan-warnings'),
+    planActions: $('plan-actions'), startBtn: $('start-btn'), otherBtn: $('other-btn'),
+    progress: $('progress'), progressText: $('progress-text'), bar: $('bar'), barFill: $('bar-fill'),
+    elapsed: $('elapsed'), slowHint: $('slow-hint'), cancelBtn: $('cancel-btn'),
+    errorBox: $('error-box'), errorMsg: $('error-msg'), errorExtra: $('error-extra'),
+    retryBtn: $('retry-btn'), errorKeyBtn: $('error-key-btn'),
+    result: $('result'), resultTitle: $('result-title'), resultFile: $('result-file'), resultWarnings: $('result-warnings'),
+    oneLine: $('r-one-line'), points: $('r-points'), sections: $('r-sections'),
+    keywordsBlock: $('r-keywords-block'), keywords: $('r-keywords'), meta: $('r-meta'),
+    copyBtn: $('copy-btn'), mdBtn: $('md-btn'), txtBtn: $('txt-btn'), newBtn: $('new-btn'), copyMsg: $('copy-msg')
+  };
+
+  // 화면 상태: idle(파일 기다림) → extracting → ready(계획 표시) → summarizing → done
+  var state = {
+    phase: 'idle',
+    file: null,        // 현재 File
+    extract: null,     // ExtractResult
+    plan: null,        // ChunkPlan
+    result: null,      // SummaryResult
+    controller: null,  // AbortController
+    runId: 0,          // 늦게 도착한 콜백을 무시하기 위한 작업 번호
+    retry: null,       // 'extract' | 'summarize' | null
+    timer: null,
+    startedAt: 0,
+    copyTimer: null
+  };
+
+  // ── 공통 도우미 ─────────────────────────────────────────────────
+  function isBusy() { return state.phase === 'extracting' || state.phase === 'summarizing'; }
+
+  function clearChildren(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
+  function addItem(list, text, tag) {
+    var item = document.createElement(tag || 'li');
+    item.textContent = text;
+    list.appendChild(item);
+    return item;
+  }
+
+  function formatSize(bytes) {
+    var n = Number(bytes) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1).replace(/\.0$/, '') + ' KB';
+    return (n / (1024 * 1024)).toFixed(1).replace(/\.0$/, '') + ' MB';
+  }
+
+  function formatNumber(n) {
+    return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  function formatDuration(ms) {
+    var s = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+    if (s < 60) return s + '초';
+    return Math.floor(s / 60) + '분' + (s % 60 ? ' ' + (s % 60) + '초' : '');
+  }
+
+  // 예상 대기 시간: CONFIG.expectedSecondsPerRequest × 요청 수 (하드코딩하지 않음)
+  function expectedTimeText(requests) {
+    var per = Summ && Summ.CONFIG ? Number(Summ.CONFIG.expectedSecondsPerRequest) : NaN;
+    var n = Number(requests) || 1;
+    if (!(per > 0)) return '무료 AI 모델이라 붐비면 시간이 더 걸릴 수 있어요.';
+    return '보통 ' + formatDuration(per * n * 1000) + ' 안팎이에요. 무료 모델이 붐비면 더 걸릴 수 있어요.';
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function formatResetAt(ms) {
+    var d = new Date(ms);
+    if (isNaN(d.getTime())) return '';
+    var now = new Date();
+    var hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    var sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    return sameDay ? hm : (d.getMonth() + 1) + '월 ' + d.getDate() + '일 ' + hm;
+  }
+
+  // 빈 쪽 번호 목록: 너무 길면 앞 15개만
+  function pageList(nums) {
+    var shown = nums.slice(0, 15).join(', ');
+    return nums.length > 15 ? shown + ' 외 ' + (nums.length - 15) + '개' : shown;
+  }
+
+  // P1-28 다운로드 파일명
+  function downloadName(fileName, ext) {
+    var base = String(fileName || '').replace(/\.pdf$/i, '');
+    base = base.replace(/[\\\/:*?"<>|\u0000-\u001f\u007f]/g, '_').slice(0, 80);
+    if (!base.trim()) base = '문서';
+    return base + '_요약.' + ext;
+  }
+
+  function isModuleError(e) {
+    if (!e || typeof e.code !== 'string') return false;
+    if (Extract && Extract.PdfExtractError && e instanceof Extract.PdfExtractError) return true;
+    if (Summ && Summ.PdfSummarizerError && e instanceof Summ.PdfSummarizerError) return true;
+    return e.name === 'PdfExtractError' || e.name === 'PdfSummarizerError';
+  }
+
+  // ── 짧은 안내 ────────────────────────────────────────────────────
+  function showNotice(text, kind) {
+    el.notice.textContent = text;
+    el.notice.className = 'notice' + (kind === 'info' ? ' info' : '');
+    el.notice.hidden = false;
+  }
+  function hideNotice() { el.notice.hidden = true; el.notice.textContent = ''; }
+
+  // ── 오류 (P1-30) ─────────────────────────────────────────────────
+  function hideError() {
+    el.errorBox.hidden = true;
+    el.errorMsg.textContent = '';
+    el.errorExtra.textContent = '';
+    el.errorExtra.hidden = true;
+    el.retryBtn.hidden = true;
+    el.errorKeyBtn.hidden = true;
+    state.retry = null;
+  }
+
+  function showError(err, stage) {
+    var known = isModuleError(err);
+    if (!known && typeof console !== 'undefined' && console.error) {
+      console.error('[index_pdf] 예상 못한 오류:', err && err.name, err && err.message);
+    }
+    el.errorMsg.textContent = known && err.message ? err.message : UNKNOWN_MSG;
+    var extra = '';
+    if (known && err.code === 'DAILY_LIMIT') {
+      extra = err.resetAt ? formatResetAt(err.resetAt) + ' 이후에 다시 쓸 수 있어요.' : '';
+      extra += (extra ? ' ' : '') + '무료 모델은 하루 약 50회까지 요청할 수 있어요.';
+    } else if (known && err.code === 'RATE_LIMITED') {
+      extra = '무료 모델은 여러 사람이 함께 써서 자주 붐벼요.';
+    } else if (known && err.code === 'TIMEOUT') {
+      extra = '무료 AI 모델이 붐벼 응답이 늦어진 것 같아요. 잠시 뒤에 [다시 시도]를 눌러 주세요.';
+    } else if (known && (err.code === 'NO_TEXT')) {
+      extra = '글자를 선택·복사할 수 있는 PDF만 요약할 수 있어요.';
+    }
+    el.errorExtra.textContent = extra;
+    el.errorExtra.hidden = !extra;
+
+    var keyProblem = known && (err.code === 'NO_API_KEY' || err.code === 'INVALID_KEY');
+    state.retry = known && err.retryable ? stage : null;
+    el.retryBtn.hidden = !state.retry;
+    el.errorKeyBtn.hidden = !keyProblem;
+    el.errorBox.hidden = false;
+
+    if (keyProblem) {
+      openKeyPanel(err.code === 'INVALID_KEY'
+        ? 'API 키가 올바르지 않아요. 새 키를 입력한 뒤 [요약 시작]을 다시 눌러 주세요.'
+        : '요약하려면 OpenRouter API 키가 필요해요. 키를 저장한 뒤 [요약 시작]을 다시 눌러 주세요.', true);
+    } else {
+      el.errorBox.focus();
+    }
+  }
+
+  // ── 진행 표시 (P1-24) ────────────────────────────────────────────
+  function setProgress(text, fraction) {
+    el.progressText.textContent = text;
+    if (fraction == null) {
+      el.bar.classList.add('indeterminate');
+      el.barFill.style.width = '';
+    } else {
+      el.bar.classList.remove('indeterminate');
+      el.barFill.style.width = Math.max(0, Math.min(1, fraction)) * 100 + '%';
+    }
+  }
+
+  function startTimer() {
+    stopTimer();
+    state.startedAt = Date.now();
+    el.elapsed.textContent = '0초 경과';
+    state.timer = setInterval(function () {
+      el.elapsed.textContent = formatDuration(Date.now() - state.startedAt) + ' 경과';
+    }, 1000);
+  }
+  function stopTimer() {
+    if (state.timer) clearInterval(state.timer);
+    state.timer = null;
+  }
+
+  // ── 화면 전환 ────────────────────────────────────────────────────
+  function render() {
+    var p = state.phase;
+    var busy = isBusy();
+    el.drop.setAttribute('aria-disabled', busy ? 'true' : 'false');
+    el.fileCard.hidden = p === 'idle';
+    el.plan.hidden = !(state.plan && (p === 'ready' || p === 'summarizing'));
+    el.planActions.hidden = !(p === 'ready' || p === 'summarizing');
+    el.startBtn.disabled = p !== 'ready';
+    el.otherBtn.disabled = busy;
+    el.progress.hidden = !busy;
+    el.cancelBtn.disabled = !busy;
+    el.slowHint.hidden = p !== 'summarizing';
+    if (p === 'summarizing') el.slowHint.textContent = ' · ' + expectedTimeText(state.plan ? state.plan.plannedRequests : 1);
+    // 처리 중·결과 표시 때는 드롭 영역을 한 줄로 접는다. 개인정보 안내는 전송 전(대기, 계획)에만 보인다
+    var compact = p !== 'idle';
+    el.upload.classList.toggle('compact', compact);
+    el.drop.classList.toggle('compact', compact);
+    el.privacy.hidden = !(p === 'idle' || p === 'ready');
+    el.result.hidden = p !== 'done';
+    if (!busy) stopTimer();
+  }
+
+  function resetResult() {
+    state.result = null;
+    clearChildren(el.points);
+    clearChildren(el.sections);
+    clearChildren(el.keywords);
+    clearChildren(el.meta);
+    clearChildren(el.resultWarnings);
+    el.resultWarnings.hidden = true;
+    el.oneLine.textContent = '';
+    el.copyMsg.textContent = '';
+  }
+
+  function goIdle() {
+    if (state.controller) { try { state.controller.abort(); } catch (e) { /* 무시 */ } }
+    state.controller = null;
+    state.runId++;
+    state.phase = 'idle';
+    state.file = null;
+    state.extract = null;
+    state.plan = null;
+    resetResult();
+    hideError();
+    render();
+  }
+
+  // ── 파일 받기 (P1-1, P1-3, P1-4) ─────────────────────────────────
+  function acceptFiles(files) {
+    var count = files ? files.length : 0;
+    if (isBusy()) {
+      showNotice('지금 요약 중이에요. 끝나거나 취소한 뒤 올려 주세요.');
+      return;
+    }
+    if (count === 0) {
+      showNotice('파일을 찾지 못했어요. PDF 파일을 끌어다 놓아 주세요.');
+      return;
+    }
+    if (count > 1) {
+      showNotice('한 번에 PDF 하나만 올려 주세요.');
+      return;
+    }
+    startExtract(files[0]);
+  }
+
+  function showFileBasics(file) {
+    el.fileName.textContent = file && file.name ? file.name : '(이름 없음)';
+    el.fileSize.textContent = formatSize(file && file.size);
+    el.filePages.textContent = '확인 중';
+    el.docTitle.textContent = '';
+    el.docTitleRow.hidden = true;
+    clearChildren(el.planWarnings);
+    el.planWarnings.hidden = true;
+  }
+
+  // ── 추출 ────────────────────────────────────────────────────────
+  function startExtract(file) {
+    if (!Extract) return;
+    hideNotice();
+    hideError();
+    resetResult();
+    state.file = file;
+    state.extract = null;
+    state.plan = null;
+    state.phase = 'extracting';
+    showFileBasics(file);
+    var id = ++state.runId;
+    var controller = new AbortController();
+    state.controller = controller;
+    setProgress('PDF 확인 중', null);
+    startTimer();
+    render();
+    el.cancelBtn.focus();
+
+    var run;
+    try {
+      run = Extract.extractText(file, {
+        signal: controller.signal,
+        onProgress: function (ev) {
+          if (id !== state.runId || !ev) return;
+          if (ev.stage === 'load') {
+            setProgress('PDF 여는 중', null);
+          } else if (ev.stage === 'page') {
+            el.filePages.textContent = ev.pageCount + '쪽';
+            setProgress('글자 읽는 중 (' + ev.page + '/' + ev.pageCount + '쪽)', ev.page / ev.pageCount);
+          }
+        }
+      });
+    } catch (e) {
+      run = Promise.reject(e);
+    }
+    Promise.resolve(run).then(function (res) {
+      if (id !== state.runId) return;
+      state.controller = null;
+      onExtracted(res);
+    }, function (err) {
+      if (id !== state.runId) return;
+      state.controller = null;
+      state.phase = 'idle';
+      render();
+      if (err && err.code === 'ABORTED' && isModuleError(err)) {
+        state.file = null;
+        showNotice(err.message || '취소했어요.', 'info');
+        el.drop.focus();
+        return;
+      }
+      // 재시도할 수 있는 추출 오류면 같은 파일을 기억해 둔다
+      if (!(isModuleError(err) && err.retryable)) state.file = null;
+      showError(err, 'extract');
+    });
+  }
+
+  function onExtracted(res) {
+    state.extract = res;
+    el.fileName.textContent = res.fileName || (state.file && state.file.name) || '(이름 없음)';
+    el.fileSize.textContent = formatSize(res.fileSize);
+    el.filePages.textContent = res.pageCount + '쪽';
+    if (res.title) {
+      el.docTitle.textContent = res.title;
+      el.docTitleRow.hidden = false;
+    }
+    var plan;
+    try {
+      plan = Summ.planChunks(res);
+    } catch (err) {
+      state.phase = 'idle';
+      render();
+      showError(err, null);
+      return;
+    }
+    state.plan = plan;
+
+    el.planCount.textContent = 'AI 요청 ' + plan.plannedRequests + '회 예정';
+    el.planTime.textContent = expectedTimeText(plan.plannedRequests);
+    el.planDetail.textContent = plan.mode === 'mapreduce'
+      ? '문서가 길어서 ' + plan.chunks.length + '조각으로 나눠 요약한 뒤 한 번 더 합쳐요.'
+      : '문서 전체를 한 번에 요약해요.';
+
+    var warnings = extractWarnings(res).concat(plan.truncated ? [truncatedPlanText(plan)] : []);
+    clearChildren(el.planWarnings);
+    warnings.forEach(function (w) { addItem(el.planWarnings, w); });
+    el.planWarnings.hidden = warnings.length === 0;
+
+    state.phase = 'ready';
+    render();
+    setProgress('', 0);
+    el.startBtn.focus();
+  }
+
+  function extractWarnings(res) {
+    var out = [];
+    var empty = res && res.emptyPages ? res.emptyPages : [];
+    var partial = res && res.warnings && res.warnings.indexOf('PARTIAL_TEXT') !== -1;
+    if (empty.length) {
+      out.push('일부 쪽(' + pageList(empty) + '쪽)에서 글자를 찾지 못해 요약에서 빠졌어요.' +
+        (partial ? ' 스캔한 쪽이 섞여 있는 것 같아요.' : ''));
+    }
+    return out;
+  }
+
+  function truncatedPlanText(plan) {
+    if (plan.coveredPages) {
+      return '문서가 길어 앞부분 약 ' + plan.coveredPages.to + '쪽(' + plan.coveredPages.from + '~' +
+        plan.coveredPages.to + '쪽)까지만 요약해요.';
+    }
+    return '문서가 길어 앞부분 약 ' + formatNumber(plan.coveredChars) + '자까지만 요약해요.';
+  }
+
+  function truncatedResultText(meta) {
+    if (meta.coveredPages) {
+      return '앞부분(' + meta.coveredPages.from + '~' + meta.coveredPages.to + '쪽)만 요약했어요. 뒷부분 내용은 빠져 있어요.';
+    }
+    return '앞부분 약 ' + formatNumber(meta.coveredChars) + '자만 요약했어요. 뒷부분 내용은 빠져 있어요.';
+  }
+
+  // ── 요약 (P1-13, P1-21, P1-24) ───────────────────────────────────
+  function startSummarize() {
+    if (state.phase !== 'ready' || !state.extract) return;
+    hideNotice();
+    hideError();
+    state.phase = 'summarizing';
+    var id = ++state.runId;
+    var controller = new AbortController();
+    state.controller = controller;
+    setProgress('AI에게 보내는 중', null);
+    startTimer();
+    render();
+    el.cancelBtn.focus();
+
+    var run;
+    try {
+      run = Summ.summarize(state.extract, {
+        signal: controller.signal,
+        onProgress: function (ev) {
+          if (id !== state.runId || !ev) return;
+          var text;
+          if (ev.stage === 'reduce') {
+            text = '요약 합치는 중';
+          } else if (ev.stage === 'map') {
+            text = '요약 중 (' + ev.current + '/' + ev.total + ')';
+            if (ev.cached) text += ' · 앞서 받은 결과 재사용';
+          } else {
+            text = '요약 중 (1/1)';
+          }
+          if (ev.retrying) text = 'AI가 바빠서 다시 시도하는 중 · ' + text;
+          // 응답을 기다리는 동안 멈춘 것처럼 보이지 않게 항상 불확정 애니메이션
+          setProgress(text, null);
+        }
+      });
+    } catch (e) {
+      run = Promise.reject(e);
+    }
+    Promise.resolve(run).then(function (result) {
+      if (id !== state.runId) return;
+      state.controller = null;
+      showResult(result);
+    }, function (err) {
+      if (id !== state.runId) return;
+      state.controller = null;
+      state.phase = 'ready';
+      render();
+      if (err && err.code === 'ABORTED' && isModuleError(err)) {
+        showNotice(err.message || '요약을 취소했어요.', 'info');
+        el.startBtn.focus();
+        return;
+      }
+      showError(err, 'summarize');
+    });
+  }
+
+  function cancelWork() {
+    if (!isBusy() || !state.controller) return;
+    el.cancelBtn.disabled = true;
+    setProgress('취소하는 중', null);
+    try { state.controller.abort(); } catch (e) { /* 무시 */ }
+  }
+
+  // ── 결과 (P1-25) ────────────────────────────────────────────────
+  function showResult(r) {
+    resetResult();
+    state.result = r;
+    var meta = r.meta || {};
+    var fileName = (state.extract && state.extract.fileName) || '';
+
+    el.resultFile.textContent = fileName;
+    el.oneLine.textContent = r.oneLine || '';
+    (r.keyPoints || []).forEach(function (p) { addItem(el.points, p); });
+    (r.sections || []).forEach(function (s) {
+      var box = document.createElement('article');
+      box.className = 'section';
+      var h = document.createElement('h4');
+      h.textContent = s.title;
+      var body = document.createElement('p');
+      body.textContent = s.summary;
+      box.appendChild(h);
+      box.appendChild(body);
+      el.sections.appendChild(box);
+    });
+    var kws = r.keywords || [];
+    kws.forEach(function (k) { addItem(el.keywords, k); });
+    el.keywordsBlock.hidden = kws.length === 0;
+
+    var warnings = [];
+    if (meta.truncated) warnings.push(truncatedResultText(meta));
+    warnings = warnings.concat(extractWarnings(state.extract));
+    warnings.forEach(function (w) { addItem(el.resultWarnings, w); });
+    el.resultWarnings.hidden = warnings.length === 0;
+
+    var rows = [
+      ['파일', fileName],
+      ['쪽수', state.extract ? state.extract.pageCount + '쪽' : ''],
+      ['모델', meta.model || ''],
+      ['방식', meta.mode === 'mapreduce' ? meta.chunkCount + '조각으로 나눠 요약' : '한 번에 요약'],
+      ['요청 횟수', (meta.requestCount != null ? meta.requestCount : '-') + '회'],
+      ['걸린 시간', formatDuration(meta.elapsedMs)]
+    ];
+    rows.forEach(function (row) {
+      if (!row[1]) return;
+      addItem(el.meta, row[0], 'dt');
+      addItem(el.meta, row[1], 'dd');
+    });
+
+    state.phase = 'done';
+    render();
+    el.resultTitle.focus();
+  }
+
+  // ── 복사 / 저장 (P1-27, P1-28) ──────────────────────────────────
+  function exportOpts() { return { fileName: state.extract ? state.extract.fileName : undefined }; }
+
+  function setCopyMsg(text, kind, autoClear) {
+    if (state.copyTimer) clearTimeout(state.copyTimer);
+    el.copyMsg.textContent = text;
+    el.copyMsg.className = 'copy-msg' + (kind ? ' ' + kind : '');
+    state.copyTimer = autoClear ? setTimeout(function () { el.copyMsg.textContent = ''; }, 2000) : null;
+  }
+
+  function legacyCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '0';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    var ok = false;
+    try { ta.select(); ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  function copyResult() {
+    if (!state.result) return;
+    var text;
+    try { text = Summ.toPlainText(state.result, exportOpts()); } catch (e) { setCopyMsg(UNKNOWN_MSG, 'bad'); return; }
+    var done = function () { setCopyMsg('복사했어요', 'ok', true); };
+    var fallback = function () {
+      if (legacyCopy(text)) done();
+      else setCopyMsg('복사하지 못했어요. 직접 선택해서 복사해 주세요.', 'bad');
+    };
+    var clip = navigator.clipboard;
+    if (clip && typeof clip.writeText === 'function') {
+      var p;
+      try { p = clip.writeText(text); } catch (e) { fallback(); return; }
+      Promise.resolve(p).then(done, fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  function download(kind) {
+    if (!state.result) return;
+    var text, mime, ext;
+    try {
+      if (kind === 'md') { text = Summ.toMarkdown(state.result, exportOpts()); mime = 'text/markdown'; ext = 'md'; }
+      else { text = Summ.toPlainText(state.result, exportOpts()); mime = 'text/plain'; ext = 'txt'; }
+    } catch (e) { setCopyMsg(UNKNOWN_MSG, 'bad'); return; }
+    var blob = new Blob([text], { type: mime + ';charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = downloadName(state.extract && state.extract.fileName, ext);
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    setCopyMsg(a.download + ' 파일을 저장했어요', 'ok', true);
+  }
+
+  // ── 키 패널 (P1-23) ─────────────────────────────────────────────
+  function keySourceText() {
+    var src = null;
+    try { src = Summ.getKeySource(); } catch (e) { src = null; }
+    el.keyClear.hidden = !(src === 'memory' || src === 'localStorage');
+    if (src === 'config') return '현재 키: config.js';
+    if (src === 'localStorage') return '현재 키: 이 브라우저에 저장됨';
+    if (src === 'memory') return '현재 키: 임시 (이 창을 닫으면 사라져요)';
+    return '현재 키: 없음';
+  }
+
+  function openKeyPanel(reason, focusInput) {
+    el.keyReason.textContent = reason || '요약하려면 OpenRouter API 키가 필요해요.';
+    el.keySource.textContent = keySourceText();
+    el.keyInput.value = '';
+    el.keyMsg.textContent = '';
+    el.keyMsg.className = 'key-msg';
+    el.keyPanel.hidden = false;
+    el.keySettings.setAttribute('aria-expanded', 'true');
+    if (focusInput !== false) el.keyInput.focus();
+  }
+
+  function closeKeyPanel() {
+    el.keyPanel.hidden = true;
+    el.keyInput.value = '';
+    el.keySettings.setAttribute('aria-expanded', 'false');
+  }
+
+  function onKeySubmit(ev) {
+    ev.preventDefault();
+    var key = el.keyInput.value.trim();
+    if (!key) {
+      el.keyMsg.textContent = '키를 입력해 주세요.';
+      el.keyMsg.className = 'key-msg bad';
+      el.keyInput.focus();
+      return;
+    }
+    var saved;
+    try {
+      saved = Summ.setApiKey(key);
+    } catch (e) {
+      el.keyInput.value = '';
+      el.keyMsg.textContent = '키를 저장하지 못했어요. 다시 입력해 주세요.';
+      el.keyMsg.className = 'key-msg bad';
+      el.keyInput.focus();
+      return;
+    }
+    key = '';
+    el.keyInput.value = '';
+    el.keySource.textContent = keySourceText();
+    el.keyMsg.textContent = saved && saved.persisted === false
+      ? '키를 저장했어요. 이 창을 닫으면 키가 사라져요.'
+      : '키를 저장했어요.';
+    el.keyMsg.className = 'key-msg ok';
+    // 키 때문에 난 오류는 지운다. 사용자가 [요약 시작]을 다시 누른다.
+    if (!el.errorKeyBtn.hidden) hideError();
+    if (state.phase === 'ready') {
+      el.keyMsg.textContent += ' [요약 시작]을 다시 눌러 주세요.';
+      el.startBtn.focus();
+    }
+  }
+
+  // ── 드래그 앤 드롭 (P1-1, P1-2) ─────────────────────────────────
+  var dragDepth = 0;
+  function hasFiles(ev) {
+    var types = ev.dataTransfer && ev.dataTransfer.types;
+    if (!types) return false;
+    for (var i = 0; i < types.length; i++) if (types[i] === 'Files') return true;
+    return false;
+  }
+  function setOver(on) { el.drop.classList.toggle('is-over', !!on); }
+
+  el.drop.addEventListener('dragenter', function (ev) {
+    if (!hasFiles(ev)) return;
+    ev.preventDefault();
+    dragDepth++;
+    setOver(true);
+  });
+  el.drop.addEventListener('dragover', function (ev) {
+    if (!hasFiles(ev)) return;
+    ev.preventDefault();
+    // 'none'으로 두면 Chrome이 drop을 보내지 않아 처리 중 안내(P1-4)가 안 뜬다 → 항상 copy (BUG-3)
+    ev.dataTransfer.dropEffect = 'copy';
+    setOver(true);
+  });
+  el.drop.addEventListener('dragleave', function () {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) setOver(false);
+  });
+  el.drop.addEventListener('drop', function (ev) {
+    ev.preventDefault();
+    dragDepth = 0;
+    setOver(false);
+    acceptFiles(ev.dataTransfer ? ev.dataTransfer.files : null);
+  });
+
+  // 드롭 영역 밖에서는 브라우저가 PDF를 열지 않게 막는다 (P1-2)
+  window.addEventListener('dragover', function (ev) {
+    if (ev.defaultPrevented) return;
+    ev.preventDefault();
+    // 'none'이면 drop이 오지 않아 영역 밖 안내(P1-2)가 안 뜬다. preventDefault로 브라우저가 파일을 여는 것만 막는다 (BUG-3)
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
+  });
+  window.addEventListener('drop', function (ev) {
+    if (ev.defaultPrevented) return;
+    ev.preventDefault();
+    dragDepth = 0;
+    setOver(false);
+    if (hasFiles(ev)) showNotice('파일은 점선 상자 안에 놓아 주세요.');
+  });
+  window.addEventListener('dragend', function () { dragDepth = 0; setOver(false); });
+
+  // 클릭·키보드로 파일 고르기
+  function openPicker() {
+    if (isBusy()) { showNotice('지금 요약 중이에요. 끝나거나 취소한 뒤 올려 주세요.'); return; }
+    el.fileInput.click();
+  }
+  el.drop.addEventListener('click', openPicker);
+  el.drop.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
+      ev.preventDefault();
+      openPicker();
+    }
+  });
+  el.fileInput.addEventListener('change', function () {
+    var files = el.fileInput.files;
+    if (files && files.length) acceptFiles(files);
+    el.fileInput.value = '';   // 같은 파일을 다시 골라도 change가 일어나게
+  });
+
+  // ── 버튼 ────────────────────────────────────────────────────────
+  el.startBtn.addEventListener('click', startSummarize);
+  el.otherBtn.addEventListener('click', function () { goIdle(); hideNotice(); openPicker(); });
+  el.newBtn.addEventListener('click', function () { goIdle(); hideNotice(); el.drop.focus(); });
+  el.cancelBtn.addEventListener('click', cancelWork);
+  el.retryBtn.addEventListener('click', function () {
+    var what = state.retry;
+    if (isBusy() || !what) return;
+    if (what === 'extract' && state.file) startExtract(state.file);
+    else if (what === 'summarize' && state.extract) startSummarize();
+  });
+  el.errorKeyBtn.addEventListener('click', function () { openKeyPanel(null, true); });
+  el.copyBtn.addEventListener('click', copyResult);
+  el.mdBtn.addEventListener('click', function () { download('md'); });
+  el.txtBtn.addEventListener('click', function () { download('txt'); });
+
+  el.keyForm.addEventListener('submit', onKeySubmit);
+  el.keyClose.addEventListener('click', function () { closeKeyPanel(); el.keySettings.focus(); });
+  el.keyClear.addEventListener('click', function () {
+    try { Summ.clearApiKey(); } catch (e) { /* 무시 */ }
+    el.keySource.textContent = keySourceText();
+    var hasKey = false;
+    try { hasKey = Summ.hasApiKey(); } catch (e) { hasKey = false; }
+    el.keyMsg.textContent = hasKey ? '저장된 키를 지웠어요. 이제 config.js의 키를 써요.' : '저장된 키를 지웠어요.';
+    el.keyMsg.className = 'key-msg';
+    el.keyInput.focus();
+  });
+  el.keySettings.addEventListener('click', function () {
+    if (!el.keyPanel.hidden) { closeKeyPanel(); return; }
+    var hasKey = false;
+    try { hasKey = Summ.hasApiKey(); } catch (e) { hasKey = false; }
+    openKeyPanel(hasKey ? '다른 키로 바꾸려면 새 키를 입력해 주세요.' : null, true);
+  });
+
+  document.addEventListener('keydown', function (ev) {
+    if ((ev.key === 'Escape' || ev.key === 'Esc') && isBusy()) cancelWork();
+  });
+
+  // ── 시작 ────────────────────────────────────────────────────────
+  render();
+  if (!Extract || !Summ) {
+    el.drop.setAttribute('aria-disabled', 'true');
+    el.errorMsg.textContent = '앱 파일(pdf_extract.js, pdf_summarizer.js)을 불러오지 못했어요. index_pdf.html과 같은 폴더에 있는지 확인한 뒤 페이지를 새로 고쳐 주세요.';
+    el.errorBox.hidden = false;
+    acceptFiles = function () { showNotice('앱 파일을 불러오지 못해 PDF를 받을 수 없어요.'); };
+  }
+})();
+</script>
+</body>
+</html>
